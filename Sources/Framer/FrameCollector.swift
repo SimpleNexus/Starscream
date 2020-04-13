@@ -24,7 +24,6 @@ import Foundation
 
 public protocol FrameCollectorDelegate: class {
     func didForm(event: FrameCollector.Event)
-    func decompress(data: Data, isFinal: Bool) -> Data?
 }
 
 public class FrameCollector {
@@ -40,7 +39,6 @@ public class FrameCollector {
     var buffer = Data()
     var frameCount = 0
     var isText = false //was the first frame a text frame or a binary frame?
-    var needsDecompression = false
     
     public func add(frame: Frame) {
         //check single frame action and out of order frames
@@ -73,16 +71,9 @@ public class FrameCollector {
         }
         if frameCount == 0 {
             isText = frame.opcode == .textFrame
-            needsDecompression = frame.needsDecompression
         }
-        
-        let payload: Data
-        if needsDecompression {
-            payload = delegate?.decompress(data: frame.payload, isFinal: frame.isFin) ?? frame.payload
-        } else {
-            payload = frame.payload
-        }
-        buffer.append(payload)
+
+        buffer.append(frame.payload)
         frameCount += 1
         if isText {
             if String(data: buffer, encoding: .utf8) == nil {

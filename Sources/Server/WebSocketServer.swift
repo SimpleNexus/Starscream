@@ -111,7 +111,7 @@ public class ServerConnection: Connection, HTTPServerDelegate, FramerEventClient
     }
     
     public func write(data: Data, opcode: FrameOpCode) {
-        let wsData = framer.createWriteFrame(opcode: opcode, payload: data, isCompressed: false)
+        let wsData = framer.createWriteFrame(opcode: opcode, payload: data)
         transport.write(data: wsData, completion: {_ in })
     }
     

@@ -45,10 +45,9 @@ public struct HTTPWSHeader {
     
     /// Creates a new URLRequest based off the source URLRequest.
     /// - Parameter request: the request to "upgrade" the WebSocket request by adding headers.
-    /// - Parameter supportsCompression: set if the client support text compression.
     /// - Parameter secKeyName: the security key to use in the WebSocket request. https://tools.ietf.org/html/rfc6455#section-1.3
     /// - returns: A URLRequest request to be converted to data and sent to the server.
-    public static func createUpgrade(request: URLRequest, supportsCompression: Bool, secKeyValue: String) -> URLRequest {
+    public static func createUpgrade(request: URLRequest, secKeyValue: String) -> URLRequest {
         guard let url = request.url, let parts = url.getParts() else {
             return request
         }
@@ -74,10 +73,6 @@ public struct HTTPWSHeader {
             }
         }
         
-        if supportsCompression {
-            let val = "permessage-deflate; client_max_window_bits; server_max_window_bits=15"
-            req.setValue(val, forHTTPHeaderField: HTTPWSHeader.extensionName)
-        }
         let hostValue = req.allHTTPHeaderFields?[HTTPWSHeader.hostName] ?? "\(parts.host):\(parts.port)"
         req.setValue(hostValue, forHTTPHeaderField: HTTPWSHeader.hostName)
         return req

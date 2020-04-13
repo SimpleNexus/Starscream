@@ -58,7 +58,6 @@ public enum FrameOpCode: UInt8 {
 
 public struct Frame {
     let isFin: Bool
-    let needsDecompression: Bool
     let isMasked: Bool
     let opcode: FrameOpCode
     let payloadLength: UInt64
@@ -78,28 +77,17 @@ public protocol FramerEventClient: class {
 public protocol Framer {
     func add(data: Data)
     func register(delegate: FramerEventClient)
-    func createWriteFrame(opcode: FrameOpCode, payload: Data, isCompressed: Bool) -> Data
-    func updateCompression(supports: Bool)
-    func supportsCompression() -> Bool
+    func createWriteFrame(opcode: FrameOpCode, payload: Data) -> Data
 }
 
 public class WSFramer: Framer {
     private let queue = DispatchQueue(label: "com.vluxe.starscream.wsframer", attributes: [])
     private weak var delegate: FramerEventClient?
     private var buffer = Data()
-    public var compressionEnabled = false
     private let isServer: Bool
     
     public init(isServer: Bool = false) {
         self.isServer = isServer
-    }
-    
-    public func updateCompression(supports: Bool) {
-        compressionEnabled = supports
-    }
-    
-    public func supportsCompression() -> Bool {
-        return compressionEnabled
     }
     
     enum ProcessEvent {
@@ -150,12 +138,8 @@ public class WSFramer: Framer {
         let isMasked = (MaskMask & pointer[1])
         let payloadLen = (PayloadLenMask & pointer[1])
         let RSV1 = (RSVMask & pointer[0])
-        var needsDecompression = false
-        
-        if compressionEnabled && opcode != .continueFrame {
-           needsDecompression = (RSV1Mask & pointer[0]) > 0
-        }
-        if !isServer && (isMasked > 0 || RSV1 > 0) && opcode != .pong && !needsDecompression {
+
+        if !isServer && (isMasked > 0 || RSV1 > 0) && opcode != .pong {
             let errCode = CloseCode.protocolError.rawValue
             return .failed(WSError(type: .protocolError, message: "masked and rsv data is not currently supported", code: errCode))
         }
@@ -238,11 +222,11 @@ public class WSFramer: Framer {
         }
         offset += readDataLength
 
-        let frame = Frame(isFin: isFin > 0, needsDecompression: needsDecompression, isMasked: isMasked > 0, opcode: opcode, payloadLength: dataLength, payload: payload, closeCode: closeCode)
+        let frame = Frame(isFin: isFin > 0, isMasked: isMasked > 0, opcode: opcode, payloadLength: dataLength, payload: payload, closeCode: closeCode)
         return .processedFrame(frame, offset)
     }
     
-    public func createWriteFrame(opcode: FrameOpCode, payload: Data, isCompressed: Bool) -> Data {
+    public func createWriteFrame(opcode: FrameOpCode, payload: Data) -> Data {
         let payloadLength = payload.count
         
         let capacity = payloadLength + MaxFrameSize
@@ -250,9 +234,6 @@ public class WSFramer: Framer {
         
         //set the framing info
         pointer[0] = FinMask | opcode.rawValue
-        if isCompressed {
-             pointer[0] |= RSV1Mask
-        }
         
         var offset = 2 //skip pass the framing info
         if payloadLength < 126 {

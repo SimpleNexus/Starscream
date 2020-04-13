@@ -33,27 +33,47 @@ public class NativeEngine: NSObject, Engine, URLSessionDataDelegate, URLSessionW
         stop(closeCode: UInt16(URLSessionWebSocketTask.CloseCode.abnormalClosure.rawValue))
     }
 
-    public func write(string: String, completion: (() -> ())?) {
-        task?.send(.string(string), completionHandler: { (error) in
-            completion?()
+    public func write(string: String, completion: ((Result<Void, Error>) -> Void)?) {
+        guard let task = task else {
+            completion?(.failure(WSError(type: .snCustom, message: "Task hasn't been initialized", code: 0)))
+            return
+        }
+        task.send(.string(string), completionHandler: { error in
+            if let error = error {
+                completion?(.failure(error))
+            } else {
+                completion?(.success(()))
+            }
         })
     }
 
-    public func write(data: Data, opcode: FrameOpCode, completion: (() -> ())?) {
+    public func write(data: Data, opcode: FrameOpCode, completion: ((Result<Void, Error>) -> Void)?) {
+        guard let task = task else {
+            completion?(.failure(WSError(type: .snCustom, message: "Task hasn't been initialized", code: 0)))
+            return
+        }
         switch opcode {
         case .binaryFrame:
-            task?.send(.data(data), completionHandler: { (error) in
-                completion?()
+            task.send(.data(data), completionHandler: { (error) in
+                if let error = error {
+                    completion?(.failure(error))
+                } else {
+                    completion?(.success(()))
+                }
             })
         case .textFrame:
             let text = String(data: data, encoding: .utf8)!
             write(string: text, completion: completion)
         case .ping:
-            task?.sendPing(pongReceiveHandler: { (error) in
-                completion?()
+            task.sendPing(pongReceiveHandler: { error in
+                if let error = error {
+                    completion?(.failure(error))
+                } else {
+                    completion?(.success(()))
+                }
             })
         default:
-            break //unsupported
+            completion?(.failure(WSError(type: .snCustom, message: "Unsupported FrameOpCode: \(String(describing: opcode))", code: 0)))
         }
     }
 

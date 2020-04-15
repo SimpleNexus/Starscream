@@ -107,11 +107,11 @@ open class WebSocket: WebSocketClient, EngineDelegate {
     }
     
     public convenience init(request: URLRequest) {
-        if #available(macOS 10.15, iOS 13.0, watchOS 6.0, tvOS 13.0, *) {
-            self.init(request: request, engine: NativeEngine())
-        } else {
+//        if #available(macOS 10.15, iOS 13.0, watchOS 6.0, tvOS 13.0, *) {
+//            self.init(request: request, engine: NativeEngine())
+//        } else {
             self.init(request: request, engine: WSEngine(transport: TCPTransport(), certPinner: FoundationSecurity()))
-        }
+//        }
     }
     
     public func connect() {

@@ -21,13 +21,14 @@
 //////////////////////////////////////////////////////////////////////////////////////////////////
 
 import Foundation
+import Network
 
 public enum HTTPUpgradeError: Error {
     case notAnUpgrade(Int)
     case invalidData
 }
 
-public struct HTTPWSHeader {
+public struct WSHTTPHeader {
     static let upgradeName        = "Upgrade"
     static let upgradeValue       = "websocket"
     static let hostName           = "Host"
@@ -48,96 +49,43 @@ public struct HTTPWSHeader {
     /// - Parameter secKeyName: the security key to use in the WebSocket request. https://tools.ietf.org/html/rfc6455#section-1.3
     /// - returns: A URLRequest request to be converted to data and sent to the server.
     public static func createUpgrade(request: URLRequest, secKeyValue: String) -> URLRequest {
-        guard let url = request.url, let parts = url.getParts() else {
+        guard let url = request.url, let components = URLComponents(url: url, resolvingAgainstBaseURL: false), let host = components.host else {
             return request
         }
         
-        var req = request
-        if request.value(forHTTPHeaderField: HTTPWSHeader.originName) == nil {
+        var request = request
+        if request.value(forHTTPHeaderField: WSHTTPHeader.originName) == nil {
             var origin = url.absoluteString
             if let hostUrl = URL (string: "/", relativeTo: url) {
                 origin = hostUrl.absoluteString
                 origin.remove(at: origin.index(before: origin.endIndex))
             }
-            req.setValue(origin, forHTTPHeaderField: HTTPWSHeader.originName)
+            request.setValue(origin, forHTTPHeaderField: WSHTTPHeader.originName)
         }
-        req.setValue(HTTPWSHeader.upgradeValue, forHTTPHeaderField: HTTPWSHeader.upgradeName)
-        req.setValue(HTTPWSHeader.connectionValue, forHTTPHeaderField: HTTPWSHeader.connectionName)
-        req.setValue(HTTPWSHeader.versionValue, forHTTPHeaderField: HTTPWSHeader.versionName)
-        req.setValue(secKeyValue, forHTTPHeaderField: HTTPWSHeader.keyName)
+        request.setValue(WSHTTPHeader.upgradeValue, forHTTPHeaderField: WSHTTPHeader.upgradeName)
+        request.setValue(WSHTTPHeader.connectionValue, forHTTPHeaderField: WSHTTPHeader.connectionName)
+        request.setValue(WSHTTPHeader.versionValue, forHTTPHeaderField: WSHTTPHeader.versionName)
+        request.setValue(secKeyValue, forHTTPHeaderField: WSHTTPHeader.keyName)
         
         if let cookies = HTTPCookieStorage.shared.cookies(for: url), !cookies.isEmpty {
             let headers = HTTPCookie.requestHeaderFields(with: cookies)
             for (key, val) in headers {
-                req.setValue(val, forHTTPHeaderField: key)
+                request.setValue(val, forHTTPHeaderField: key)
             }
         }
-        
-        let hostValue = req.allHTTPHeaderFields?[HTTPWSHeader.hostName] ?? "\(parts.host):\(parts.port)"
-        req.setValue(hostValue, forHTTPHeaderField: HTTPWSHeader.hostName)
-        return req
+
+        var port = NWEndpoint.Port.http
+        if let scheme = components.scheme, WSHTTPHeader.defaultSSLSchemes.contains(scheme) {
+            port = .https
+        }
+
+        let hostValue = request.allHTTPHeaderFields?[WSHTTPHeader.hostName] ?? "\(host):\(port.rawValue)"
+        request.setValue(hostValue, forHTTPHeaderField: WSHTTPHeader.hostName)
+        return request
     }
     
     // generateWebSocketKey 16 random characters between a-z and return them as a base64 string
     public static func generateWebSocketKey() -> String {
         return Data((0..<16).map{ _ in UInt8.random(in: 97...122) }).base64EncodedString()
-    }
-}
-
-public enum HTTPEvent {
-    case success([String: String])
-    case failure(Error)
-}
-
-public protocol HTTPHandlerDelegate: class {
-    func didReceiveHTTP(event: HTTPEvent)
-}
-
-public protocol HTTPHandler {
-    func register(delegate: HTTPHandlerDelegate)
-    func convert(request: URLRequest) -> Data
-    func parse(data: Data) -> Int
-}
-
-public protocol HTTPServerDelegate: class {
-    func didReceive(event: HTTPEvent)
-}
-
-public protocol HTTPServerHandler {
-    func register(delegate: HTTPServerDelegate)
-    func parse(data: Data)
-    func createResponse(headers: [String: String]) -> Data
-}
-
-public struct URLParts {
-    let port: Int
-    let host: String
-    let isTLS: Bool
-}
-
-public extension URL {
-    /// isTLSScheme returns true if the scheme is https or wss
-    var isTLSScheme: Bool {
-        guard let scheme = self.scheme else {
-            return false
-        }
-        return HTTPWSHeader.defaultSSLSchemes.contains(scheme)
-    }
-    
-    /// getParts pulls host and port from the url.
-    func getParts() -> URLParts? {
-        guard let host = self.host else {
-            return nil // no host, this isn't a valid url
-        }
-        let isTLS = isTLSScheme
-        var port = self.port ?? 0
-        if self.port == nil {
-            if isTLS {
-                port = 443
-            } else {
-                port = 80
-            }
-        }
-        return URLParts(port: port, host: host, isTLS: isTLS)
     }
 }

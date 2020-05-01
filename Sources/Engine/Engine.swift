@@ -8,15 +8,4 @@
 
 import Foundation
 
-public protocol EngineDelegate: class {
-    func didReceive(event: WebSocketEvent)
-}
 
-public protocol Engine {
-    func register(delegate: EngineDelegate)
-    func start(request: URLRequest)
-    func stop(closeCode: UInt16)
-    func forceStop()
-    func write(data: Data, opcode: FrameOpCode, completion: ((Result<Void, Error>) -> Void)?)
-    func write(string: String, completion: ((Result<Void, Error>) -> Void)?)
-}

@@ -1,6 +1,6 @@
 //////////////////////////////////////////////////////////////////////////////////////////////////
 //
-//  FoundationHTTPHandler.swift
+//  WSHTTPHandler.swift
 //  Starscream
 //
 //  Created by Dalton Cherry on 1/25/19.
@@ -21,13 +21,16 @@
 //////////////////////////////////////////////////////////////////////////////////////////////////
 
 import Foundation
-#if os(watchOS)
-public typealias FoundationHTTPHandler = StringHTTPHandler
-#else
-public class FoundationHTTPHandler: HTTPHandler {
+
+public typealias HTTPEvent = Result<[String: String], Error>
+public protocol FoundationHTTPHandlerDelegate: class {
+    func didReceiveHTTP(event: HTTPEvent)
+}
+
+public class WSHTTPHandler {
 
     var buffer = Data()
-    weak var delegate: HTTPHandlerDelegate?
+    weak var delegate: FoundationHTTPHandlerDelegate?
     
     public init() {
         
@@ -77,7 +80,7 @@ public class FoundationHTTPHandler: HTTPHandler {
         }
         
         let code = CFHTTPMessageGetResponseStatusCode(response)
-        if code != HTTPWSHeader.switchProtocolCode {
+        if code != WSHTTPHeader.switchProtocolCode {
             delegate?.didReceiveHTTP(event: .failure(HTTPUpgradeError.notAnUpgrade(code)))
             return true
         }
@@ -98,10 +101,6 @@ public class FoundationHTTPHandler: HTTPHandler {
         return true
     }
     
-    public func register(delegate: HTTPHandlerDelegate) {
-        self.delegate = delegate
-    }
-    
     private func findEndOfHTTP(data: Data) -> Int {
         let endBytes = [UInt8(ascii: "\r"), UInt8(ascii: "\n"), UInt8(ascii: "\r"), UInt8(ascii: "\n")]
         var pointer = [UInt8]()
@@ -120,4 +119,3 @@ public class FoundationHTTPHandler: HTTPHandler {
         return -1
     }
 }
-#endif

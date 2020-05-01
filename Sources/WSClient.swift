@@ -11,14 +11,16 @@ import CommonCrypto
 import Network
 
 public enum WSConnectionState: Equatable {
+    case connecting
     case connected(headers: [String: String])
-    case disconnected(closeCode: WSCloseCode = .normal, reason: String? = nil, error: WSError? = nil)
+    case waiting(error: Error)
+    case disconnected(closeCode: WSCloseCode = .normal, reason: String? = nil)
 
     public var isConnected: Bool {
         switch self {
         case .connected:
             return true
-        case .disconnected:
+        case .disconnected, .connecting, .waiting:
             return false
         }
     }
@@ -27,8 +29,8 @@ public enum WSConnectionState: Equatable {
         switch (lhs, rhs) {
         case (.connected(let lhsHeaders), .connected(let rhsHeaders)):
             return lhsHeaders == rhsHeaders
-        case (.disconnected(let lhsCloseCode, let lhsReason, let lhsError), .disconnected(let rhsCloseCode, let rhsReason, let rhsError)):
-            return lhsCloseCode == rhsCloseCode && lhsReason == rhsReason && lhsError == rhsError
+        case (.disconnected(let lhsCloseCode, let lhsReason), .disconnected(let rhsCloseCode, let rhsReason)):
+            return lhsCloseCode == rhsCloseCode && lhsReason == rhsReason
         default:
             return false
         }
@@ -76,10 +78,19 @@ public class WSClient {
     private let writeQueue = DispatchQueue(label: "com.vluxe.starscream.writequeue")
     private let mutex = DispatchSemaphore(value: 1)
 
-    private var connectionState = WSConnectionState.disconnected() {
-        didSet {
-            guard oldValue != self.connectionState else { return }
-            self.broadcastConnectionStateChanged(to: self.connectionState)
+    private var _unsafeConnectionState = WSConnectionState.disconnected()
+    private var connectionState: WSConnectionState {
+        get {
+            self.mutex.wait(); defer { self.mutex.signal() }
+            return self._unsafeConnectionState
+        }
+        set {
+            self.mutex.wait(); defer { self.mutex.signal() }
+            let stateChanged = self._unsafeConnectionState != newValue
+            self._unsafeConnectionState = newValue
+            if stateChanged {
+                self.broadcastConnectionStateChanged(to: self._unsafeConnectionState)
+            }
         }
     }
     private var isViable = false {
@@ -94,36 +105,6 @@ public class WSClient {
             self.broadcastBetterPathAvailableChanged(to: self.isBetterPathAvailable)
         }
     }
-
-    private var _unsafeDidUpgrade = false
-    private var didUpgrade: Bool {
-        get {
-            self.mutex.wait()
-            let value = self._unsafeDidUpgrade
-            self.mutex.signal()
-            return value
-        }
-        set {
-            self.mutex.wait()
-            self._unsafeDidUpgrade = newValue
-            self.mutex.signal()
-        }
-    }
-
-    private var _unsafeIsConnected = false
-    private var isConnected: Bool {
-        get {
-            self.mutex.wait()
-            let value = self._unsafeIsConnected
-            self.mutex.signal()
-            return value
-        }
-        set {
-            self.mutex.wait()
-            self._unsafeIsConnected = newValue
-            self.mutex.signal()
-        }
-    }
     
     public weak var delegate: WSClientDelegate?
 
@@ -133,7 +114,7 @@ public class WSClient {
     }
 
     public func connect() {
-        guard !self.isConnected else { return }
+        guard !self.connectionState.isConnected else { return }
 
         self.websocketConnection.delegate = self
         self.httpHandler.delegate = self
@@ -143,27 +124,24 @@ public class WSClient {
         self.websocketConnection.connect(url: url, timeout: request.timeoutInterval)
     }
 
-    public func broadcastDisconnection(closeCode: WSCloseCode = .normal, reason: String? = nil, error: WSError? = nil) {
+    public func broadcastDisconnection(closeCode: WSCloseCode = .normal, reason: String? = nil) {
         let capacity = MemoryLayout<UInt16>.size
         var pointer = [UInt8](repeating: 0, count: capacity)
         pointer.writeUInt16(closeCode.rawValue, offset: 0)
         let payload = Data(bytes: pointer, count: MemoryLayout<UInt16>.size)
         self.write(data: payload, opcode: .connectionClose) { [weak self] _ in
             guard let self = self else { return }
-            self.disconnect(closeCode: closeCode, reason: "", error: nil)
+            self.disconnect(closeCode: closeCode, reason: reason)
         }
     }
     
     public func forceDisconnect() {
-        self.disconnect(closeCode: WSCloseCode.abnormalClosure, reason: "Force Stopped", error: nil)
+        self.disconnect(closeCode: WSCloseCode.abnormalClosure, reason: "Force Stopped")
     }
 
-    private func disconnect(closeCode: WSCloseCode, reason: String?, error: WSError?) {
-        self.isConnected = false
-        self.didUpgrade = false
-
+    private func disconnect(closeCode: WSCloseCode, reason: String?) {
         self.websocketConnection.disconnect()
-        self.connectionState = .disconnected(closeCode: closeCode, reason: reason, error: error)
+        self.connectionState = .disconnected(closeCode: closeCode, reason: reason)
     }
     
     public func write(string: String, completion: ((Result<Void, Error>) -> Void)?) {
@@ -201,7 +179,7 @@ public class WSClient {
                 }
             }
 
-            guard self.isConnected else {
+            guard self.connectionState.isConnected else {
                 completionOnMainThread(.failure(WSError(type: .frameParseError, message: "State of engine doesn't allow sending", code: .protocolError)))
                 return
             }
@@ -246,7 +224,11 @@ public class WSClient {
     }
 
     private func broadcastError(_ error: Error) {
-        self.broadcastDisconnection(error: error as? WSError)
+        if let error = error as? WSError {
+            self.broadcastDisconnection(closeCode: error.code, reason: error.message)
+        } else {
+            self.broadcastDisconnection()
+        }
     }
 }
 extension WSClient {
@@ -274,7 +256,11 @@ extension WSClient: WSConnectionDelegate {
             self.broadcastCancelled(true)
         case .failed(let error):
             self.broadcastError(error)
-        case .setup, .preparing, .waiting:
+        case .waiting(let error):
+            self.connectionState = .waiting(error: error)
+        case .preparing:
+            self.connectionState = .connecting
+        case .setup:
             break
         @unknown default:
             break
@@ -282,7 +268,7 @@ extension WSClient: WSConnectionDelegate {
     }
 
     public func wsConnection(_ wsConnection: WSConnection, didReceiveData data: Data) {
-        if self.didUpgrade {
+        if self.connectionState.isConnected {
             self.frameHandler.add(data: data)
         } else {
             let offset = self.httpHandler.parse(data: data)
@@ -331,14 +317,10 @@ extension WSClient: FoundationHTTPHandlerDelegate {
     public func didReceiveHTTP(event: HTTPEvent) {
         switch event {
         case .success(let headers):
-            if let error = self.validate(headers: headers, key: secKeyValue) {
+            if let error = self.validate(headers: headers, key: self.secKeyValue) {
                 self.broadcastError(error)
                 return
             }
-            self.mutex.wait()
-            self.didUpgrade = true
-            self.isConnected = true
-            self.mutex.signal()
             if let url = self.request.url {
                 HTTPCookie.cookies(withResponseHeaderFields: headers, for: url).forEach {
                     HTTPCookieStorage.shared.setCookie($0)

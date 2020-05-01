@@ -24,7 +24,6 @@ import Foundation
 
 protocol WSFrameCollectorDelegate: class {
     func didForm(event: WSFrameCollectorEvent)
-    func receivedError(_ error: Error)
 }
 
 public enum WSFrameCollectorEvent {
@@ -41,24 +40,26 @@ class WSFrameCollector {
     var buffer = Data()
     var frameCount = 0
     var isText = false //was the first frame a text frame or a binary frame?
-    private static let queue = DispatchQueue(label: "com.vluxe.starscream.wsframer", attributes: [])
+    private let queue = DispatchQueue(label: "com.vluxe.starscream.wsframer", attributes: [])
 
     func add(data: Data) {
-        Self.queue.async {
+        self.queue.async {
             var tempBuffer = Data()
             tempBuffer.append(data)
             while(true) {
                 switch Self.process(tempBuffer) {
                 case .processedFrame(let frame, let split):
                     self.add(frame: frame)
-                    if split >= tempBuffer.count {
+                    if split < tempBuffer.count {
                         tempBuffer = tempBuffer.advanced(by: split)
+                    } else {
+                        return
                     }
                 case .failed(let error):
-                    self.delegate?.receivedError(error)
-                    break
+                    self.delegate?.didForm(event: .error(error))
+                    return
                 case .needsMoreData:
-                    break
+                    return
                 }
             }
         }

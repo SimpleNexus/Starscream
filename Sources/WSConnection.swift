@@ -19,37 +19,7 @@ public class WSConnection {
     weak var delegate: WSConnectionDelegate?
     private var isRunning = false
     
-    public init(connection: NWConnection) {
-        self.connection = connection
-        self.start()
-    }
-    
-    public init() {
-        //normal connection, will use the "connect" method below
-    }
-
     public func connect(url: URL, timeout: Double = 10) {
-        guard let parts = url.getParts() else {
-            return
-        }
-        let isTLS = parts.isTLS
-        let options = NWProtocolTCP.Options()
-        options.connectionTimeout = Int(timeout.rounded(.up))
-
-        let tlsOptions = isTLS ? NWProtocolTLS.Options() : nil
-        if let tlsOpts = tlsOptions {
-            sec_protocol_options_set_verify_block(tlsOpts.securityProtocolOptions, { (sec_protocol_metadata, sec_trust, sec_protocol_verify_complete) in
-                let trust = sec_trust_copy_ref(sec_trust).takeRetainedValue()
-                sec_protocol_verify_complete(true)
-            }, queue)
-        }
-        let parameters = NWParameters(tls: tlsOptions, tcp: options)
-        let conn = NWConnection(host: NWEndpoint.Host.name(parts.host, nil), port: NWEndpoint.Port(rawValue: UInt16(parts.port))!, using: parameters)
-        connection = conn
-        start()
-    }
-    
-    public func connect2(url: URL, timeout: Double = 10) {
         guard let host = URLComponents(url: url, resolvingAgainstBaseURL: false)?.host else {
             //TODO: Fix
 //            self.delegate?.wsConnection(self, didUpdateConnectionState: .failed(NWError.))
@@ -60,28 +30,14 @@ public class WSConnection {
         var port = NWEndpoint.Port.http
         if let scheme = url.scheme, WSHTTPHeader.defaultSSLSchemes.contains(scheme) {
             port = .https
-//            tlsOptions = NWProtocolTLS.Options()
-//            if let tlsOptions = tlsOptions {
-//                sec_protocol_options_set_verify_block(tlsOptions.securityProtocolOptions, { (sec_protocol_metadata, sec_trust, sec_protocol_verify_complete) in
-//                    _ = sec_trust_copy_ref(sec_trust).takeRetainedValue()
-//                    sec_protocol_verify_complete(true)
-//                }, queue)
-//            }
-            
             let options = NWProtocolTLS.Options()
             sec_protocol_options_set_verify_block(options.securityProtocolOptions, { (sec_protocol_metadata, sec_trust, sec_protocol_verify_complete) in
-//                sec_protocol_verify_complete(true)
                 let trust = sec_trust_copy_ref(sec_trust).takeRetainedValue()
                 var error: CFError?
                 if SecTrustEvaluateWithError(trust, &error) {
                     sec_protocol_verify_complete(true)
                 } else {
                     sec_protocol_verify_complete(false)
-//                    if allowInsecure == true {
-//                        sec_protocol_verify_complete(true)
-//                    } else {
-//                        sec_protocol_verify_complete(false)
-//                    }
                 }
             }, self.queue)
             tlsOptions = options
@@ -91,7 +47,6 @@ public class WSConnection {
         options.connectionTimeout = Int(timeout)
 
         let parameters = NWParameters(tls: tlsOptions, tcp: options)
-//        let parameters2 = NWParameters.tls
         self.connection = NWConnection(host: .name(host, nil), port: port, using: parameters)
         self.start()
     }

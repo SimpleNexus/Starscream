@@ -26,10 +26,15 @@ public class WSConnection {
             return
         }
 
+
+        var port: NWEndpoint.Port?
+        if let urlPort = url.port {
+            port = NWEndpoint.Port(integerLiteral: UInt16(urlPort))
+        }
+
         var tlsOptions: NWProtocolTLS.Options?
-        var port = NWEndpoint.Port.http
         if let scheme = url.scheme, WSHTTPHeader.defaultSSLSchemes.contains(scheme) {
-            port = .https
+            port = port ?? .https
             let options = NWProtocolTLS.Options()
             sec_protocol_options_set_verify_block(options.securityProtocolOptions, { (sec_protocol_metadata, sec_trust, sec_protocol_verify_complete) in
                 let trust = sec_trust_copy_ref(sec_trust).takeRetainedValue()
@@ -47,7 +52,7 @@ public class WSConnection {
         options.connectionTimeout = Int(timeout)
 
         let parameters = NWParameters(tls: tlsOptions, tcp: options)
-        self.connection = NWConnection(host: .name(host, nil), port: port, using: parameters)
+        self.connection = NWConnection(host: .name(host, nil), port: port ?? .http, using: parameters)
         self.start()
     }
     
